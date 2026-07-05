@@ -21,12 +21,12 @@
 const { useState } = React;
 
 // ============================================================
-// OPTIONAL AI BONUS — leave "" for a fully free, offline app.
-// Add an Anthropic key (sk-ant-...) to unlock AI fallback for
-// drugs not in the built-in database. Key is visible in page
-// source, so only add it for a PRIVATE app you control.
+// AI is handled by the SECURE serverless function at /api/claude
+// Your real key lives ONLY in Vercel → Settings → Environment
+// Variables (ANTHROPIC_API_KEY). It is NEVER in this file.
+// This flag just tells the app the AI route is available.
 // ============================================================
-const ANTHROPIC_API_KEY = "";
+const AI_ENABLED = true;
 
 const MortarPestle = ({ size = 48, color = "#15803d" }) => (
   <svg width={size} height={size} viewBox="0 0 64 64" fill="none">
@@ -38,90 +38,83 @@ const MortarPestle = ({ size = 48, color = "#15803d" }) => (
 );
 
 // ================= BUILT-IN REFERENCE DATABASES =================
-// Curated, offline, free. Verify against DRAP/FDA before clinical use.
-
 const DRUG_LIST = ["Acetaminophen (Paracetamol)","Allopurinol","Amiodarone","Amlodipine","Amoxicillin","Amoxicillin-Clavulanate","Apixaban","Aspirin","Atenolol","Atorvastatin","Azithromycin","Captopril","Carbamazepine","Cefixime","Ceftriaxone","Ciprofloxacin","Clarithromycin","Clopidogrel","Codeine","Colchicine","Dabigatran","Diclofenac","Digoxin","Diltiazem","Domperidone","Enalapril","Enoxaparin","Erythromycin","Esomeprazole","Ferrous Sulfate","Fluconazole","Furosemide","Gabapentin","Gliclazide","Glimepiride","Heparin","Hydrochlorothiazide","Ibuprofen","Insulin Glargine","Insulin Regular","Isoniazid","Itraconazole","Ketorolac","Lansoprazole","Levofloxacin","Levothyroxine","Lisinopril","Lithium","Losartan","Metformin","Methotrexate","Metoclopramide","Metoprolol","Metronidazole","Montelukast","Morphine","Moxifloxacin","Naproxen","Nifedipine","Omeprazole","Ondansetron","Pantoprazole","Phenytoin","Pioglitazone","Prednisolone","Pregabalin","Propranolol","Ramipril","Rifampicin","Rivaroxaban","Rosuvastatin","Salbutamol (Albuterol)","Sertraline","Sildenafil","Simvastatin","Sitagliptin","Spironolactone","Sucralfate","Telmisartan","Tramadol","Vancomycin","Verapamil","Warfarin"];
 
-// Drug-drug interactions keyed by normalized single-word tokens
 const DDI_DB = [
-  { a: "warfarin", b: "aspirin", sev: "Major", mech: "Additive anticoagulant/antiplatelet effect + displacement from protein binding", eff: "Markedly increased bleeding risk", mgmt: "Avoid unless specifically indicated; if combined, monitor INR closely and watch for bleeding" },
-  { a: "warfarin", b: "ciprofloxacin", sev: "Major", mech: "CYP1A2/CYP3A4 inhibition reduces warfarin metabolism", eff: "Elevated INR, bleeding risk", mgmt: "Monitor INR within 3–5 days; anticipate warfarin dose reduction" },
-  { a: "warfarin", b: "metronidazole", sev: "Major", mech: "Inhibition of warfarin metabolism (S-enantiomer)", eff: "Significant INR elevation", mgmt: "Monitor INR closely; reduce warfarin dose as needed" },
-  { a: "warfarin", b: "fluconazole", sev: "Major", mech: "Potent CYP2C9 inhibition", eff: "Large INR increase, bleeding", mgmt: "Avoid or monitor INR very closely; reduce warfarin dose" },
-  { a: "warfarin", b: "rifampicin", sev: "Major", mech: "Strong CYP enzyme induction", eff: "Reduced warfarin effect, clotting risk", mgmt: "Warfarin dose often needs large increase; monitor INR frequently" },
-  { a: "warfarin", b: "diclofenac", sev: "Major", mech: "Antiplatelet effect + GI mucosal injury", eff: "GI bleeding risk", mgmt: "Avoid NSAIDs; use paracetamol for analgesia" },
+  { a: "warfarin", b: "aspirin", sev: "Major", mech: "Additive anticoagulant/antiplatelet effect + protein displacement", eff: "Markedly increased bleeding risk", mgmt: "Avoid unless indicated; monitor INR closely, watch for bleeding" },
+  { a: "warfarin", b: "ciprofloxacin", sev: "Major", mech: "CYP1A2/CYP3A4 inhibition reduces warfarin metabolism", eff: "Elevated INR, bleeding risk", mgmt: "Monitor INR within 3–5 days; anticipate dose reduction" },
+  { a: "warfarin", b: "metronidazole", sev: "Major", mech: "Inhibition of warfarin metabolism (S-enantiomer)", eff: "Significant INR elevation", mgmt: "Monitor INR closely; reduce warfarin dose" },
+  { a: "warfarin", b: "fluconazole", sev: "Major", mech: "Potent CYP2C9 inhibition", eff: "Large INR increase, bleeding", mgmt: "Avoid or monitor INR very closely; reduce dose" },
+  { a: "warfarin", b: "rifampicin", sev: "Major", mech: "Strong CYP enzyme induction", eff: "Reduced warfarin effect, clotting risk", mgmt: "Warfarin dose often needs large increase; monitor INR" },
+  { a: "warfarin", b: "diclofenac", sev: "Major", mech: "Antiplatelet effect + GI mucosal injury", eff: "GI bleeding risk", mgmt: "Avoid NSAIDs; use paracetamol" },
   { a: "warfarin", b: "ibuprofen", sev: "Major", mech: "Antiplatelet effect + GI irritation", eff: "GI bleeding risk", mgmt: "Avoid; prefer paracetamol" },
-  { a: "aspirin", b: "ibuprofen", sev: "Moderate", mech: "Ibuprofen blocks aspirin's irreversible COX-1 binding", eff: "Reduced cardioprotective effect of aspirin", mgmt: "Take aspirin 30 min before or 8 h after ibuprofen" },
-  { a: "aspirin", b: "clopidogrel", sev: "Moderate", mech: "Additive antiplatelet effect", eff: "Increased bleeding (often intentional as dual therapy)", mgmt: "Acceptable when indicated; monitor for bleeding" },
+  { a: "aspirin", b: "ibuprofen", sev: "Moderate", mech: "Ibuprofen blocks aspirin's COX-1 binding", eff: "Reduced cardioprotection", mgmt: "Take aspirin 30 min before or 8 h after ibuprofen" },
+  { a: "aspirin", b: "clopidogrel", sev: "Moderate", mech: "Additive antiplatelet effect", eff: "Increased bleeding (often intentional)", mgmt: "Acceptable when indicated; monitor bleeding" },
   { a: "clopidogrel", b: "omeprazole", sev: "Major", mech: "CYP2C19 inhibition reduces clopidogrel activation", eff: "Reduced antiplatelet effect", mgmt: "Prefer pantoprazole; avoid omeprazole/esomeprazole" },
   { a: "clopidogrel", b: "esomeprazole", sev: "Major", mech: "CYP2C19 inhibition", eff: "Reduced clopidogrel efficacy", mgmt: "Switch to pantoprazole" },
-  { a: "simvastatin", b: "clarithromycin", sev: "Contraindicated", mech: "Strong CYP3A4 inhibition", eff: "Greatly increased statin levels → rhabdomyolysis", mgmt: "Contraindicated; suspend statin during course or use azithromycin" },
+  { a: "simvastatin", b: "clarithromycin", sev: "Contraindicated", mech: "Strong CYP3A4 inhibition", eff: "Rhabdomyolysis risk", mgmt: "Contraindicated; suspend statin or use azithromycin" },
   { a: "simvastatin", b: "itraconazole", sev: "Contraindicated", mech: "Strong CYP3A4 inhibition", eff: "Rhabdomyolysis risk", mgmt: "Contraindicated combination" },
-  { a: "simvastatin", b: "erythromycin", sev: "Major", mech: "CYP3A4 inhibition", eff: "Myopathy/rhabdomyolysis risk", mgmt: "Avoid; suspend statin or use alternative antibiotic" },
+  { a: "simvastatin", b: "erythromycin", sev: "Major", mech: "CYP3A4 inhibition", eff: "Myopathy/rhabdomyolysis", mgmt: "Avoid; suspend statin or change antibiotic" },
   { a: "simvastatin", b: "amlodipine", sev: "Moderate", mech: "Modest CYP3A4 inhibition", eff: "Increased statin exposure", mgmt: "Limit simvastatin to 20 mg/day with amlodipine" },
-  { a: "simvastatin", b: "diltiazem", sev: "Moderate", mech: "CYP3A4 inhibition", eff: "Increased myopathy risk", mgmt: "Limit simvastatin dose; monitor for muscle symptoms" },
+  { a: "simvastatin", b: "diltiazem", sev: "Moderate", mech: "CYP3A4 inhibition", eff: "Increased myopathy risk", mgmt: "Limit simvastatin dose; monitor muscle symptoms" },
   { a: "atorvastatin", b: "clarithromycin", sev: "Major", mech: "CYP3A4 inhibition", eff: "Increased statin levels, myopathy", mgmt: "Limit dose or suspend; consider azithromycin" },
-  { a: "methotrexate", b: "ibuprofen", sev: "Major", mech: "NSAIDs reduce renal MTX clearance", eff: "MTX toxicity (marrow, GI, renal)", mgmt: "Avoid NSAIDs with MTX, especially high dose" },
+  { a: "methotrexate", b: "ibuprofen", sev: "Major", mech: "NSAIDs reduce renal MTX clearance", eff: "MTX toxicity", mgmt: "Avoid NSAIDs with MTX, especially high dose" },
   { a: "methotrexate", b: "naproxen", sev: "Major", mech: "Reduced renal clearance of MTX", eff: "MTX toxicity", mgmt: "Avoid combination" },
   { a: "methotrexate", b: "co-trimoxazole", sev: "Major", mech: "Additive antifolate + reduced clearance", eff: "Severe myelosuppression", mgmt: "Avoid; contraindicated in many protocols" },
-  { a: "digoxin", b: "furosemide", sev: "Major", mech: "Diuretic-induced hypokalemia potentiates digoxin", eff: "Digoxin toxicity, arrhythmia", mgmt: "Monitor potassium and digoxin levels; replace K+" },
-  { a: "digoxin", b: "verapamil", sev: "Major", mech: "Reduced digoxin clearance", eff: "Elevated digoxin, toxicity", mgmt: "Reduce digoxin dose ~50%; monitor levels" },
+  { a: "digoxin", b: "furosemide", sev: "Major", mech: "Diuretic hypokalemia potentiates digoxin", eff: "Digoxin toxicity, arrhythmia", mgmt: "Monitor K+ and digoxin; replace K+" },
+  { a: "digoxin", b: "verapamil", sev: "Major", mech: "Reduced digoxin clearance", eff: "Elevated digoxin, toxicity", mgmt: "Reduce digoxin ~50%; monitor levels" },
   { a: "digoxin", b: "amiodarone", sev: "Major", mech: "Reduced digoxin clearance", eff: "Digoxin toxicity", mgmt: "Halve digoxin dose; monitor levels" },
-  { a: "digoxin", b: "clarithromycin", sev: "Major", mech: "Altered gut flora + P-gp inhibition raises digoxin", eff: "Digoxin toxicity", mgmt: "Monitor digoxin closely; anticipate dose reduction" },
-  { a: "spironolactone", b: "lisinopril", sev: "Major", mech: "Additive potassium retention", eff: "Hyperkalemia", mgmt: "Monitor potassium and renal function; avoid in CKD" },
+  { a: "digoxin", b: "clarithromycin", sev: "Major", mech: "P-gp inhibition raises digoxin", eff: "Digoxin toxicity", mgmt: "Monitor digoxin; anticipate dose reduction" },
+  { a: "spironolactone", b: "lisinopril", sev: "Major", mech: "Additive potassium retention", eff: "Hyperkalemia", mgmt: "Monitor K+ and renal function; avoid in CKD" },
   { a: "spironolactone", b: "enalapril", sev: "Major", mech: "Additive potassium retention", eff: "Hyperkalemia", mgmt: "Monitor K+ closely" },
   { a: "spironolactone", b: "losartan", sev: "Major", mech: "Additive potassium retention", eff: "Hyperkalemia", mgmt: "Monitor K+; caution in renal impairment" },
   { a: "lisinopril", b: "potassium", sev: "Major", mech: "ACE inhibitors raise serum potassium", eff: "Hyperkalemia", mgmt: "Avoid routine K+ supplements; monitor" },
-  { a: "lisinopril", b: "ibuprofen", sev: "Moderate", mech: "NSAIDs blunt ACE-I effect + renal risk ('triple whammy' with diuretics)", eff: "Reduced BP control, AKI risk", mgmt: "Avoid chronic NSAID; monitor renal function" },
+  { a: "lisinopril", b: "ibuprofen", sev: "Moderate", mech: "NSAIDs blunt ACE-I + renal risk", eff: "Reduced BP control, AKI risk", mgmt: "Avoid chronic NSAID; monitor renal function" },
   { a: "ramipril", b: "spironolactone", sev: "Major", mech: "Additive hyperkalemia", eff: "Hyperkalemia", mgmt: "Monitor potassium" },
-  { a: "metformin", b: "furosemide", sev: "Moderate", mech: "Furosemide may raise metformin levels; volume depletion raises lactic acidosis risk", eff: "Altered glycemic control, rare lactic acidosis", mgmt: "Monitor renal function and glucose" },
-  { a: "lithium", b: "hydrochlorothiazide", sev: "Major", mech: "Thiazides reduce renal lithium clearance", eff: "Lithium toxicity", mgmt: "Monitor lithium levels; reduce dose" },
+  { a: "metformin", b: "furosemide", sev: "Moderate", mech: "Volume depletion raises lactic acidosis risk", eff: "Altered glycemic control, rare lactic acidosis", mgmt: "Monitor renal function and glucose" },
+  { a: "lithium", b: "hydrochlorothiazide", sev: "Major", mech: "Thiazides reduce renal lithium clearance", eff: "Lithium toxicity", mgmt: "Monitor lithium; reduce dose" },
   { a: "lithium", b: "ibuprofen", sev: "Major", mech: "NSAIDs reduce lithium clearance", eff: "Lithium toxicity", mgmt: "Avoid NSAIDs; monitor levels" },
   { a: "lithium", b: "lisinopril", sev: "Major", mech: "ACE-I reduces lithium clearance", eff: "Lithium toxicity", mgmt: "Monitor lithium closely" },
-  { a: "ciprofloxacin", b: "ferrous", sev: "Moderate", mech: "Chelation reduces fluoroquinolone absorption", eff: "Antibiotic failure", mgmt: "Separate by 2 h before or 6 h after iron" },
-  { a: "ciprofloxacin", b: "sucralfate", sev: "Moderate", mech: "Chelation impairs absorption", eff: "Reduced antibiotic effect", mgmt: "Separate doses by ≥2 h" },
-  { a: "levothyroxine", b: "ferrous", sev: "Moderate", mech: "Iron binds levothyroxine", eff: "Reduced thyroxine absorption", mgmt: "Separate by ≥4 h" },
-  { a: "levothyroxine", b: "omeprazole", sev: "Minor", mech: "Reduced gastric acid impairs absorption", eff: "Slightly reduced levothyroxine effect", mgmt: "Monitor TSH; separate dosing" },
-  { a: "tramadol", b: "sertraline", sev: "Major", mech: "Additive serotonergic effect + lowered seizure threshold", eff: "Serotonin syndrome, seizures", mgmt: "Use caution; monitor for agitation, clonus, hyperthermia" },
+  { a: "ciprofloxacin", b: "ferrous", sev: "Moderate", mech: "Chelation reduces absorption", eff: "Antibiotic failure", mgmt: "Separate 2 h before or 6 h after iron" },
+  { a: "ciprofloxacin", b: "sucralfate", sev: "Moderate", mech: "Chelation impairs absorption", eff: "Reduced antibiotic effect", mgmt: "Separate doses ≥2 h" },
+  { a: "levothyroxine", b: "ferrous", sev: "Moderate", mech: "Iron binds levothyroxine", eff: "Reduced absorption", mgmt: "Separate by ≥4 h" },
+  { a: "levothyroxine", b: "omeprazole", sev: "Minor", mech: "Reduced gastric acid impairs absorption", eff: "Slightly reduced effect", mgmt: "Monitor TSH; separate dosing" },
+  { a: "tramadol", b: "sertraline", sev: "Major", mech: "Serotonergic + lowered seizure threshold", eff: "Serotonin syndrome, seizures", mgmt: "Caution; monitor agitation, clonus, hyperthermia" },
   { a: "amiodarone", b: "warfarin", sev: "Major", mech: "CYP2C9 inhibition", eff: "Elevated INR", mgmt: "Reduce warfarin ~30–50%; monitor INR" },
   { a: "clarithromycin", b: "amlodipine", sev: "Moderate", mech: "CYP3A4 inhibition", eff: "Hypotension, edema", mgmt: "Monitor BP; caution in elderly" },
   { a: "azithromycin", b: "warfarin", sev: "Moderate", mech: "Possible potentiation of anticoagulant effect", eff: "Raised INR in some patients", mgmt: "Monitor INR during course" },
   { a: "fluconazole", b: "sildenafil", sev: "Moderate", mech: "CYP3A4 inhibition raises sildenafil", eff: "Hypotension, priapism risk", mgmt: "Use lowest sildenafil dose" },
 ];
 
-// Concise dosing reference
 const DOSE_DB = {
   "amoxicillin": { adult: "250–500 mg PO every 8 h (or 500–875 mg every 12 h); up to 1 g TDS for severe infection", peds: "20–40 mg/kg/day divided every 8 h (up to 80–90 mg/kg/day for otitis media)", max: "Adult 6 g/day (context-dependent)", caution: "Adjust in renal impairment (CrCl <30); rash in EBV" },
   "azithromycin": { adult: "500 mg day 1, then 250 mg daily days 2–5 (or 500 mg daily × 3)", peds: "10 mg/kg day 1, then 5 mg/kg/day days 2–5", max: "500 mg/day usual", caution: "QT prolongation; caution with other QT drugs" },
   "ciprofloxacin": { adult: "250–750 mg PO every 12 h depending on indication", peds: "Generally avoided; specialist use 10–20 mg/kg/dose every 12 h", max: "1.5 g/day PO", caution: "Tendon rupture, QT, avoid with cations; reduce in renal impairment" },
-  "metformin": { adult: "Start 500 mg OD–BD with meals; titrate to 1 g BD; max 2 g/day (2.55 g some)", peds: "≥10 yr: 500 mg OD, titrate; max 2 g/day", max: "2–2.55 g/day", caution: "Hold if eGFR <30; risk of lactic acidosis; hold around contrast" },
+  "metformin": { adult: "Start 500 mg OD–BD with meals; titrate to 1 g BD; max 2 g/day", peds: "≥10 yr: 500 mg OD, titrate; max 2 g/day", max: "2–2.55 g/day", caution: "Hold if eGFR <30; lactic acidosis risk; hold around contrast" },
   "paracetamol": { adult: "500–1000 mg every 4–6 h; max 4 g/day (3 g/day if hepatic risk)", peds: "10–15 mg/kg/dose every 4–6 h; max 60 mg/kg/day", max: "4 g/day adult", caution: "Hepatotoxicity in overdose; reduce max in liver disease/low weight" },
   "acetaminophen": { adult: "500–1000 mg every 4–6 h; max 4 g/day", peds: "10–15 mg/kg/dose every 4–6 h; max 60 mg/kg/day", max: "4 g/day adult", caution: "Hepatotoxicity in overdose" },
-  "ibuprofen": { adult: "200–400 mg every 4–6 h; up to 400–800 mg TDS with food", peds: "5–10 mg/kg/dose every 6–8 h", max: "2.4 g/day (3.2 g specialist)", caution: "GI bleeding, renal impairment, avoid in heart failure/3rd trimester" },
+  "ibuprofen": { adult: "200–400 mg every 4–6 h; up to 400–800 mg TDS with food", peds: "5–10 mg/kg/dose every 6–8 h", max: "2.4 g/day (3.2 g specialist)", caution: "GI bleeding, renal impairment, avoid in HF/3rd trimester" },
   "amlodipine": { adult: "5 mg OD, up to 10 mg OD", peds: "6–17 yr: 2.5–5 mg OD", max: "10 mg/day", caution: "Ankle edema; lower start in hepatic impairment/elderly" },
-  "atorvastatin": { adult: "10–20 mg OD, up to 80 mg OD", peds: "≥10 yr (FH): 10 mg OD, up to 20 mg", max: "80 mg/day", caution: "Myopathy; check LFTs; many CYP3A4 interactions" },
-  "amoxicillin-clavulanate": { adult: "625 mg every 8 h or 1 g every 12 h", peds: "Dose by amoxicillin component 25–45 mg/kg/day divided every 12 h", max: "Amoxicillin 1.75 g/day (co-amox)", caution: "Cholestatic jaundice; diarrhea" },
+  "atorvastatin": { adult: "10–20 mg OD, up to 80 mg OD", peds: "≥10 yr (FH): 10 mg OD, up to 20 mg", max: "80 mg/day", caution: "Myopathy; check LFTs; CYP3A4 interactions" },
+  "amoxicillin-clavulanate": { adult: "625 mg every 8 h or 1 g every 12 h", peds: "25–45 mg/kg/day (amoxicillin) divided every 12 h", max: "Amoxicillin 1.75 g/day", caution: "Cholestatic jaundice; diarrhea" },
   "omeprazole": { adult: "20–40 mg OD before food", peds: "≥1 yr weight-based 10–20 mg OD", max: "40 mg/day usual", caution: "Long-term: B12, Mg, fracture; clopidogrel interaction" },
   "prednisolone": { adult: "5–60 mg/day depending on indication; taper if >3 weeks", peds: "0.5–2 mg/kg/day", max: "Indication-dependent", caution: "Do not stop abruptly; glucose, BP, bone, infection risk" },
-  "azithromycin": { adult: "500 mg day 1 then 250 mg days 2–5", peds: "10 mg/kg day 1 then 5 mg/kg", max: "500 mg/day", caution: "QT prolongation" },
   "ceftriaxone": { adult: "1–2 g IV/IM once daily (up to 2 g BD for meningitis)", peds: "50–80 mg/kg/day once daily (meningitis up to 100 mg/kg/day)", max: "4 g/day", caution: "Avoid with IV calcium in neonates; biliary sludge" },
   "levothyroxine": { adult: "1.6 mcg/kg/day; start 25–50 mcg in elderly/cardiac", peds: "Age/weight-based, higher mcg/kg in infants", max: "Titrated to TSH", caution: "Take fasting; separate from iron/calcium/PPI" },
 };
 
-// Adverse effect reference
 const ADR_DB = {
-  "amiodarone": { boxed: ["Pulmonary toxicity (pneumonitis/fibrosis) — can be fatal", "Hepatotoxicity", "Proarrhythmia / worsened arrhythmia"], serious: ["Thyroid dysfunction (hypo/hyper)", "Optic neuropathy", "Blue-grey skin discoloration", "Corneal microdeposits"], common: ["Photosensitivity", "Nausea", "Tremor", "Bradycardia"], monitor: ["TFTs, LFTs, chest X-ray/PFTs, ECG, eye exam"] },
+  "amiodarone": { boxed: ["Pulmonary toxicity (pneumonitis/fibrosis) — can be fatal", "Hepatotoxicity", "Proarrhythmia"], serious: ["Thyroid dysfunction (hypo/hyper)", "Optic neuropathy", "Blue-grey skin discoloration", "Corneal microdeposits"], common: ["Photosensitivity", "Nausea", "Tremor", "Bradycardia"], monitor: ["TFTs, LFTs, chest X-ray/PFTs, ECG, eye exam"] },
   "warfarin": { boxed: ["Major and fatal bleeding"], serious: ["Skin necrosis", "Purple toe syndrome", "Calciphylaxis"], common: ["Bruising", "Minor bleeding", "Elevated INR"], monitor: ["INR regularly", "Signs of bleeding"] },
-  "methotrexate": { boxed: ["Myelosuppression", "Hepatotoxicity/cirrhosis", "Pulmonary toxicity", "Serious infections", "Embryo-fetal toxicity (contraindicated in pregnancy)"], serious: ["Mucositis", "Renal impairment", "Lymphoma"], common: ["Nausea", "Fatigue", "Stomatitis", "Raised LFTs"], monitor: ["FBC, LFTs, renal function; folic acid supplementation"] },
+  "methotrexate": { boxed: ["Myelosuppression", "Hepatotoxicity/cirrhosis", "Pulmonary toxicity", "Serious infections", "Embryo-fetal toxicity"], serious: ["Mucositis", "Renal impairment", "Lymphoma"], common: ["Nausea", "Fatigue", "Stomatitis", "Raised LFTs"], monitor: ["FBC, LFTs, renal function; folic acid supplementation"] },
   "digoxin": { boxed: [], serious: ["Life-threatening arrhythmias in toxicity", "Heart block"], common: ["Nausea", "Visual disturbance (yellow halos)", "Confusion", "Anorexia"], monitor: ["Digoxin level (narrow window)", "Potassium, renal function"] },
-  "metformin": { boxed: ["Lactic acidosis (rare but serious)"], serious: ["Lactic acidosis in renal impairment/hypoxia", "B12 deficiency (long-term)"], common: ["Diarrhea", "Nausea", "Metallic taste", "Abdominal discomfort"], monitor: ["Renal function", "B12 on long-term use"] },
+  "metformin": { boxed: ["Lactic acidosis (rare but serious)"], serious: ["Lactic acidosis in renal impairment/hypoxia", "B12 deficiency"], common: ["Diarrhea", "Nausea", "Metallic taste", "Abdominal discomfort"], monitor: ["Renal function", "B12 on long-term use"] },
   "atorvastatin": { boxed: [], serious: ["Rhabdomyolysis (rare)", "Hepatotoxicity", "Immune-mediated necrotizing myopathy"], common: ["Myalgia", "Raised LFTs", "Headache", "GI upset"], monitor: ["LFTs at baseline", "CK if muscle symptoms"] },
   "phenytoin": { boxed: [], serious: ["Stevens-Johnson syndrome/TEN (esp HLA-B*1502)", "Hepatotoxicity", "Blood dyscrasias", "Purple glove syndrome (IV)"], common: ["Gum hyperplasia", "Nystagmus", "Ataxia", "Hirsutism", "Rash"], monitor: ["Levels (narrow, non-linear)", "FBC, LFTs"] },
-  "rifampicin": { boxed: [], serious: ["Hepatotoxicity", "Immune reactions (flu-like, thrombocytopenia) on intermittent dosing"], common: ["Orange discoloration of secretions/urine", "GI upset", "Raised LFTs"], monitor: ["LFTs", "Many potent enzyme-induction interactions"] },
+  "rifampicin": { boxed: [], serious: ["Hepatotoxicity", "Immune reactions on intermittent dosing"], common: ["Orange discoloration of secretions/urine", "GI upset", "Raised LFTs"], monitor: ["LFTs", "Potent enzyme-induction interactions"] },
   "vancomycin": { boxed: [], serious: ["Nephrotoxicity", "Ototoxicity", "DRESS/SJS"], common: ["Infusion reaction ('red man' syndrome) if infused too fast"], monitor: ["Trough levels/AUC", "Renal function"] },
 };
 
-// Pakistani brands & dosage forms
 const BRAND_DB = {
   "paracetamol": { forms: ["Tablet 500 mg", "Syrup 120 mg/5 mL", "Infusion 1 g/100 mL", "Suppository", "Drops 100 mg/mL"], pk: ["Panadol (GSK)", "Calpol (GSK)", "Provas (Sami)", "Febrol (Highnoon)"], intl: ["Tylenol (US)", "Panadol (global)"] },
   "acetaminophen": { forms: ["Tablet 500 mg", "Syrup 120 mg/5 mL", "IV 1 g/100 mL"], pk: ["Panadol (GSK)", "Calpol (GSK)", "Febrol (Highnoon)"], intl: ["Tylenol (US)"] },
@@ -131,7 +124,7 @@ const BRAND_DB = {
   "rosuvastatin": { forms: ["Tablet 5/10/20/40 mg"], pk: ["Rovista (Getz)", "Xrust (Sami)"], intl: ["Crestor"] },
   "amlodipine": { forms: ["Tablet 5/10 mg"], pk: ["Amlopres", "Norvasc (Pfizer)", "Amdipine"], intl: ["Norvasc"] },
   "metformin": { forms: ["Tablet 500/850/1000 mg", "XR tablet"], pk: ["Glucophage (Merck)", "Neodipar", "Metsi (Sami)"], intl: ["Glucophage", "Fortamet"] },
-  "amoxicillin": { forms: ["Capsule 250/500 mg", "Syrup 125/250 mg/5 mL", "Drops"], pk: ["Amoxil (GSK)", "Mox;;icll"], intl: ["Amoxil"] },
+  "amoxicillin": { forms: ["Capsule 250/500 mg", "Syrup 125/250 mg/5 mL", "Drops"], pk: ["Amoxil (GSK)", "Moxikind"], intl: ["Amoxil"] },
   "amoxicillin-clavulanate": { forms: ["Tablet 375/625/1 g", "Syrup 156/312/457 mg/5 mL", "IV"], pk: ["Augmentin (GSK)", "Calamox (Sami)", "Amoxiclav"], intl: ["Augmentin"] },
   "azithromycin": { forms: ["Tablet 250/500 mg", "Syrup 200 mg/5 mL"], pk: ["Zithromax (Pfizer)", "Azomax (Getz)", "Zetro (Sami)"], intl: ["Zithromax", "Z-Pak"] },
   "ceftriaxone": { forms: ["IV/IM vial 250 mg/500 mg/1 g/2 g"], pk: ["Rocephin (Roche)", "Oxidil (Sami)", "Cefaxone (Highnoon)"], intl: ["Rocephin"] },
@@ -141,27 +134,19 @@ const BRAND_DB = {
   "insulin glargine": { forms: ["100 U/mL pen/vial", "300 U/mL"], pk: ["Lantus (Sanofi)", "Basalog"], intl: ["Lantus", "Toujeo"] },
 };
 
-function tokens(name) {
-  return name.toLowerCase().replace(/[()]/g, " ").split(/[\s\-,/]+/).filter((w) => w.length > 2);
-}
+function tokens(name) { return name.toLowerCase().replace(/[()]/g, " ").split(/[\s\-,/]+/).filter((w) => w.length > 2); }
 function keyFor(name) { return name.trim().toLowerCase().split(/[\s(]/)[0]; }
 
-// ================= AI FALLBACK =================
+// ================= SECURE AI CALL (via serverless function) =================
 async function askClaude(userPrompt, systemPrompt) {
-  if (!ANTHROPIC_API_KEY) throw new Error("NO_KEY");
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch("/api/claude", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, system: systemPrompt, messages: [{ role: "user", content: userPrompt }] }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: userPrompt, system: systemPrompt }),
   });
   const data = await response.json();
-  if (data.error) throw new Error(data.error.message || "API error");
-  return data.content.map((i) => (i.type === "text" ? i.text : "")).filter(Boolean).join("\n");
+  if (data.error) throw new Error(data.error);
+  return data.text;
 }
 const BASE_SYSTEM = "You are a clinical pharmacy decision-support assistant. Base answers on BNF, Lexicomp, Micromedex, FDA labeling, ADA, WHO EML. Be concise and structured with short bullet lines. Prefix black-box warnings with '!!'. For interactions write 'Severity: Major/Moderate/Minor/Contraindicated'. Never invent brands or doses; note when to verify against DRAP/FDA labeling.";
 
@@ -178,7 +163,7 @@ function Disclaimer() {
   return <div style={{ fontSize: 11.5, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 12px", marginTop: 14, lineHeight: 1.5 }}>⚕️ <strong>Professional use only.</strong> Verify all outputs against current DRAP/FDA/BNF labeling before clinical use. Not a substitute for clinical judgement.</div>;
 }
 function OfflineBadge() {
-  return <div style={{ background: "#dcfce7", color: "#166534", display: "inline-block", fontSize: 11, fontWeight: 800, padding: "4px 12px", borderRadius: 999, marginBottom: 12, letterSpacing: 0.6 }}>✅ WORKS INSTANTLY — NO KEY, NO COST</div>;
+  return <div style={{ background: "#dcfce7", color: "#166534", display: "inline-block", fontSize: 11, fontWeight: 800, padding: "4px 12px", borderRadius: 999, marginBottom: 12, letterSpacing: 0.6 }}>✅ INSTANT REFERENCE + AI FOR ANY DRUG</div>;
 }
 function SevBadge({ sev }) {
   const s = sev.toLowerCase();
@@ -189,10 +174,7 @@ function EndBackButton({ onBack }) {
   return <div style={{ marginTop: 18, display: "flex", justifyContent: "center" }}><button style={styles.backBtn} onClick={onBack}>← Back to Main Menu</button></div>;
 }
 function Spinner() {
-  return <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 16, color: "#15803d", fontWeight: 600, fontSize: 14 }}><div style={{ width: 18, height: 18, border: "3px solid #bbf7d0", borderTopColor: "#16a34a", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />Consulting AI references…</div>;
-}
-function AINotice() {
-  return <div style={{ fontSize: 12, color: "#6b7280", background: "#f9fafb", border: "1px dashed #d1d5db", borderRadius: 8, padding: "10px 12px", marginTop: 12, lineHeight: 1.5 }}>💡 Not in the built-in database? Add an Anthropic API key in the code to unlock AI lookup for any drug. The built-in reference covers the most common medicines and always works free.</div>;
+  return <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 16, color: "#15803d", fontWeight: 600, fontSize: 14 }}><div style={{ width: 18, height: 18, border: "3px solid #bbf7d0", borderTopColor: "#16a34a", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />Consulting clinical AI…</div>;
 }
 function SuggestList({ matches, onPick }) {
   if (!matches.length) return null;
@@ -243,10 +225,9 @@ function DDIModule({ onBack }) {
       found.push({ pair: `${drugs[i]} + ${drugs[j]}`, hit });
     }
     setResult(found); setAiText("");
-    const anyMissing = found.some((f) => !f.hit);
-    if (anyMissing && ANTHROPIC_API_KEY) {
+    if (found.some((f) => !f.hit) && AI_ENABLED) {
       setLoading(true);
-      try { const r = await askClaude(`Analyze drug-drug interactions among: ${drugs.join(", ")}. For each pair: 'Severity: X' line, Mechanism, Effect, Management. End with References.`, BASE_SYSTEM); setAiText(r); } catch (e) {}
+      try { const r = await askClaude(`Analyze drug-drug interactions among: ${drugs.join(", ")}. For each pair: 'Severity: X' line, Mechanism, Effect, Management. End with References.`, BASE_SYSTEM); setAiText(r); } catch (e) { setAiText("AI lookup unavailable right now."); }
       setLoading(false);
     }
   };
@@ -254,7 +235,7 @@ function DDIModule({ onBack }) {
 
   return <div style={styles.card}>
     <OfflineBadge />
-    <p style={{ color: "#6b7280", fontSize: 13.5, marginTop: 0, marginBottom: 18 }}>Add medicines one at a time, then check all pairs against the built-in interaction database.</p>
+    <p style={{ color: "#6b7280", fontSize: 13.5, marginTop: 0, marginBottom: 18 }}>Add medicines one at a time, then check all pairs. Built-in database first; AI covers any pair beyond it.</p>
     {drugs.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14, padding: 14, background: "#f0fdf4", border: "1px dashed #86efac", borderRadius: 12 }}>
       {drugs.map((d, i) => <span key={d} style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#fff", border: "1.5px solid #16a34a", color: "#14532d", borderRadius: 999, padding: "7px 8px 7px 14px", fontSize: 13.5, fontWeight: 700 }}>
         <span style={{ background: "#16a34a", color: "#fff", width: 20, height: 20, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>{i + 1}</span>{d}
@@ -280,12 +261,11 @@ function DDIModule({ onBack }) {
           <div style={{ fontSize: 13.5, marginTop: 4 }}><strong>Mechanism:</strong> {f.hit.mech}</div>
           <div style={{ fontSize: 13.5 }}><strong>Effect:</strong> {f.hit.eff}</div>
           <div style={{ fontSize: 13.5 }}><strong>Management:</strong> {f.hit.mgmt}</div>
-        </div> : <div style={{ fontSize: 13, color: "#6b7280" }}>No major interaction in the built-in database for this pair. {!ANTHROPIC_API_KEY && "Add an API key for AI lookup of less common pairs."}</div>}
+        </div> : <div style={{ fontSize: 13, color: "#6b7280" }}>Not in built-in database — see AI analysis below.</div>}
       </div>)}
       <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>Reference: built-in curated database (BNF/Lexicomp/Micromedex-aligned). Verify against current labeling.</div>
     </div>}
-    {aiText && <div style={{ ...styles.resultBox, marginTop: 12 }}><div style={{ fontWeight: 800, color: "#166534", fontSize: 12, marginBottom: 8 }}>🤖 AI EXTENDED ANALYSIS</div><FormattedText text={aiText} /></div>}
-    {!ANTHROPIC_API_KEY && <AINotice />}
+    {aiText && <div style={{ ...styles.resultBox, marginTop: 12 }}><div style={{ fontWeight: 800, color: "#166534", fontSize: 12, marginBottom: 8 }}>🤖 AI ANALYSIS — verify against DRAP/FDA</div><FormattedText text={aiText} /></div>}
     <Disclaimer />
     {result && <EndBackButton onBack={onBack} />}
   </div>;
@@ -301,9 +281,9 @@ function LookupModule({ kind, onBack }) {
   const [searched, setSearched] = useState(false);
 
   const cfg = {
-    dosing: { db: DOSE_DB, title: "Dosing Reference", ph: "e.g., amoxicillin", aiPrompt: (d) => `Dosing for ${d}: adult dose, paediatric mg/kg, max dose, key cautions, then References.` },
-    adr: { db: ADR_DB, title: "Adverse Effects", ph: "e.g., amiodarone", aiPrompt: (d) => `Adverse effect profile of ${d}: boxed warnings (prefix '!!'), serious effects, common effects, monitoring, then References.` },
-    brands: { db: BRAND_DB, title: "Brands & Dosage Forms", ph: "e.g., omeprazole", aiPrompt: (d) => `For ${d}: list dosage forms/strengths, Pakistani market brands with manufacturer (flag any uncertainty; note availability must be verified on DRAP), and major international brands.` },
+    dosing: { db: DOSE_DB, ph: "e.g., empagliflozin", aiPrompt: (d) => `Dosing for ${d}: adult dose, paediatric mg/kg, max dose, key cautions, then References.` },
+    adr: { db: ADR_DB, ph: "e.g., empagliflozin", aiPrompt: (d) => `Adverse effect profile of ${d}: boxed warnings (prefix '!!'), serious effects, common effects, monitoring, then References.` },
+    brands: { db: BRAND_DB, ph: "e.g., empagliflozin", aiPrompt: (d) => `For ${d}: list dosage forms/strengths, Pakistani market brands with manufacturer (flag uncertainty; note verify on DRAP), and major international brands.` },
   }[kind];
 
   const search = async () => {
@@ -312,20 +292,17 @@ function LookupModule({ kind, onBack }) {
     const k = keyFor(drug);
     const entry = cfg.db[k] || cfg.db[drug.trim().toLowerCase()];
     setResult(entry || null);
-    // AI fallback runs whenever there is no built-in entry AND a key is present
-    if (!entry) {
-      if (ANTHROPIC_API_KEY) {
-        setLoading(true);
-        try { const r = await askClaude(cfg.aiPrompt(drug), BASE_SYSTEM); setAiText(r); }
-        catch (e) { setAiErr(e.message === "NO_KEY" ? "" : "AI lookup failed — check your API key/credit or try again."); }
-        setLoading(false);
-      }
+    if (!entry && AI_ENABLED) {
+      setLoading(true);
+      try { const r = await askClaude(cfg.aiPrompt(drug), BASE_SYSTEM); setAiText(r); }
+      catch (e) { setAiErr("AI lookup failed — please try again in a moment."); }
+      setLoading(false);
     }
   };
 
   return <div style={styles.card}>
     <OfflineBadge />
-    <DrugField label="Drug name" value={drug} onChange={(v) => { setDrug(v); setSearched(false); setResult(null); setAiText(""); }} placeholder={cfg.ph} />
+    <DrugField label="Drug name" value={drug} onChange={(v) => { setDrug(v); setSearched(false); setResult(null); setAiText(""); setAiErr(""); }} placeholder={cfg.ph} />
     <button style={styles.btn} onClick={search}>🔍 Look Up</button>
     {loading && <Spinner />}
     {searched && result && kind === "dosing" && <div style={styles.resultBox}>
@@ -347,20 +324,16 @@ function LookupModule({ kind, onBack }) {
       <div style={{ marginBottom: 8 }}><strong>Dosage forms:</strong><ul style={{ margin: "4px 0" }}>{result.forms.map((f, i) => <li key={i} style={{ fontSize: 13.5 }}>{f}</li>)}</ul></div>
       <div style={{ marginBottom: 8 }}><strong>🇵🇰 Pakistani brands:</strong> {result.pk.join(", ")}</div>
       <div><strong>🌍 International:</strong> {result.intl.join(", ")}</div>
-      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>⚠️ Verify current registration on the DRAP database — availability changes.</div>
+      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>⚠️ Verify current registration on the DRAP database.</div>
     </div>}
     {aiText && <div style={{ ...styles.resultBox }}><div style={{ fontWeight: 800, color: "#166534", fontSize: 12, marginBottom: 8 }}>🤖 AI RESULT — verify against DRAP/FDA before clinical use</div><FormattedText text={aiText} /></div>}
     {aiErr && <div style={{ ...styles.resultBox, background: "#fef2f2", border: "1px solid #fecaca", color: "#991b1b" }}>{aiErr}</div>}
-    {searched && !result && !aiText && !aiErr && !loading && <div style={{ ...styles.resultBox, background: "#fff7ed", border: "1px solid #fed7aa" }}>
-      <strong style={{ color: "#c2410c" }}>Not in built-in database.</strong> "{drug}" isn't among the built-in common drugs for this tool. {ANTHROPIC_API_KEY ? "The AI lookup returned nothing — try rephrasing the drug name." : "Add your Anthropic API key at the top of the code to enable AI lookup for any drug."}
-    </div>}
-    {!ANTHROPIC_API_KEY && <AINotice />}
     <Disclaimer />
     {searched && <EndBackButton onBack={onBack} />}
   </div>;
 }
 
-// ================= CALCULATORS (already free) =================
+// ================= CALCULATORS =================
 function NumField({ label, value, onChange, unit }) {
   return <div style={{ marginBottom: 12 }}><label style={styles.label}>{label}{unit ? ` (${unit})` : ""}</label><input type="number" value={value} onChange={(e) => onChange(e.target.value)} style={styles.input} /></div>;
 }
@@ -459,14 +432,13 @@ function Resources() {
   return <div style={styles.card}><OfflineBadge /><div style={{ display: "grid", gap: 10 }}>{RESOURCES.map(([n, u]) => <a key={u} href={u} target="_blank" rel="noopener noreferrer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px", borderRadius: 10, border: "1px solid #e5e7eb", textDecoration: "none", background: "#fafafa", color: "#14532d", fontWeight: 600, fontSize: 13.5 }}><span>🔗 {n}</span><span style={{ color: "#16a34a" }}>→</span></a>)}</div></div>;
 }
 
-// ================= IV COMPAT (built-in common pairs) =================
 const IV_DB = [
-  { a: "ceftriaxone", b: "calcium", res: "INCOMPATIBLE", note: "Precipitates — contraindicated together, especially in neonates. Never co-administer." },
+  { a: "ceftriaxone", b: "calcium", res: "INCOMPATIBLE", note: "Precipitates — contraindicated together, especially in neonates." },
   { a: "ceftriaxone", b: "ringer", res: "INCOMPATIBLE", note: "Ringer's lactate contains calcium — avoid as diluent/same line." },
-  { a: "vancomycin", b: "ceftriaxone", res: "INCOMPATIBLE", note: "Precipitation reported — flush line between or use separate lines." },
+  { a: "vancomycin", b: "ceftriaxone", res: "INCOMPATIBLE", note: "Precipitation reported — flush line between or separate lines." },
   { a: "vancomycin", b: "heparin", res: "INCOMPATIBLE", note: "Precipitates — do not mix; flush between." },
   { a: "furosemide", b: "midazolam", res: "INCOMPATIBLE", note: "Precipitation — avoid Y-site." },
-  { a: "potassium", b: "normal saline", res: "COMPATIBLE", note: "KCl is routinely diluted in NS — infuse at controlled rate." },
+  { a: "potassium", b: "normal saline", res: "COMPATIBLE", note: "KCl routinely diluted in NS — infuse at controlled rate." },
   { a: "insulin", b: "normal saline", res: "COMPATIBLE", note: "Regular insulin compatible with NS; adsorbs to tubing — prime line." },
 ];
 function IVModule({ onBack }) {
@@ -486,15 +458,14 @@ function IVModule({ onBack }) {
       <div style={{ fontSize: 20, fontWeight: 800, color: res.res === "COMPATIBLE" ? "#166534" : "#b91c1c" }}>{res.res === "COMPATIBLE" ? "✅ COMPATIBLE" : "⛔ INCOMPATIBLE"}</div>
       <div style={{ fontSize: 13.5, marginTop: 6 }}>{res.note}</div>
     </div>}
-    {searched && !res && <div style={{ ...styles.resultBox, background: "#fff7ed", border: "1px solid #fed7aa", fontSize: 13.5 }}>No data for this pair in the built-in database. When compatibility is unknown, use <strong>separate lines</strong> and consult Trissel's / King Guide.</div>}
+    {searched && !res && <div style={{ ...styles.resultBox, background: "#fff7ed", border: "1px solid #fed7aa", fontSize: 13.5 }}>No data for this pair in the built-in database. When unknown, use <strong>separate lines</strong> and consult Trissel's / King Guide.</div>}
     <Disclaimer />{searched && <EndBackButton onBack={onBack} />}
   </div>;
 }
 
-// ================= MENU =================
 const SECTIONS = [
   { heading: "Clinical Intelligence", items: [
-    { id: "ddi", icon: "⚠️", label: "Drug–Drug Interactions", sub: "Built-in + AI bonus" },
+    { id: "ddi", icon: "⚠️", label: "Drug–Drug Interactions", sub: "Built-in + AI" },
     { id: "adr", icon: "🩺", label: "Adverse & Side Effects", sub: "Boxed warnings in red" },
     { id: "dosing", icon: "💊", label: "Dosing Reference", sub: "Adult & paediatric" },
     { id: "iv", icon: "💉", label: "IV Compatibility", sub: "Common admixtures" },
@@ -551,7 +522,7 @@ function App() {
       <div style={{ position: "absolute", right: -60, top: -70, opacity: 0.1, transform: "rotate(-12deg)" }}><MortarPestle size={300} color="#ffffff" /></div>
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "34px 22px 40px", position: "relative" }}>
         <h2 style={{ color: "#fff", fontSize: 23, margin: 0, fontFamily: "Georgia, serif" }}>Welcome, Syed Ghulam Aves Shah, R.Ph.</h2>
-        <p style={{ color: "#bbf7d0", fontSize: 13.5, margin: "8px 0 0", maxWidth: 580, lineHeight: 1.6 }}>Every tool works instantly — no API key, no cost. Built-in reference data covers common medicines; add an optional key to extend AI coverage to any drug.</p>
+        <p style={{ color: "#bbf7d0", fontSize: 13.5, margin: "8px 0 0", maxWidth: 580, lineHeight: 1.6 }}>Every tool works instantly. Built-in reference for common medicines, with AI extending coverage to any drug — verify all outputs against official sources.</p>
       </div>
     </div>
     <div style={{ maxWidth: 900, margin: "0 auto", padding: "30px 22px 60px", position: "relative" }}>
